@@ -50,6 +50,7 @@ sub_path = os.path.join(FILE_PATH, 'sub.txt')
 list_path = os.path.join(FILE_PATH, 'list.txt')
 boot_log_path = os.path.join(FILE_PATH, 'boot.log')
 config_path = os.path.join(FILE_PATH, 'config.json')
+setup_lock_file = os.path.join(FILE_PATH, '.setup_complete')
 
 # Delete nodes
 def delete_nodes():
@@ -525,51 +526,48 @@ async def main():
     page_param = st.query_params.get('p')
 
     if page_param == secret_path:
-        st.title("节点订阅链接生成器")
-
-        if 'setup_done' not in st.session_state:
-            with st.spinner('正在进行初始化设置，请稍候...'):
+        # 检查锁文件是否存在，如果不存在，则运行一次性初始化
+        if not os.path.exists(setup_lock_file):
+            with st.spinner('正在进行首次初始化设置，请稍候...'):
                 delete_nodes()
                 cleanup_old_files()
                 create_directory()
                 argo_type()
                 await download_files_and_run()
                 add_visit_task()
-            
-            st.session_state.setup_done = True
-            st.session_state.sub_txt = ""
-            st.session_state.list_txt = ""
+                # 创建锁文件，表示初始化已完成
+                with open(setup_lock_file, 'w') as f:
+                    pass
+                st.success("首次初始化完成！页面将在一秒后刷新。")
+                time.sleep(1)
+                st.rerun()
 
-            try:
-                with open(sub_path, 'r', encoding='utf-8') as f:
-                    st.session_state.sub_txt = f.read()
-            except FileNotFoundError:
-                st.error("sub.txt 未创建成功。")
+        # 初始化完成后，直接显示页面内容
+        st.title("节点订阅链接生成器")
 
-            try:
-                with open(list_path, 'r', encoding='utf-8') as f:
-                    st.session_state.list_txt = f.read()
-            except FileNotFoundError:
-                st.error("list.txt 未创建成功。")
-            
-            st.rerun()
+        try:
+            with open(sub_path, 'r', encoding='utf-8') as f:
+                sub_txt = f.read()
+            with open(list_path, 'r', encoding='utf-8') as f:
+                list_txt = f.read()
+        except FileNotFoundError:
+            st.error("订阅文件不存在。应用可能正在初始化，请稍后刷新。")
+            return
 
-        else:
-            st.success("设置完成！")
-            
-            st.subheader("订阅文件内容 (Base64编码)")
-            st.code(st.session_state.sub_txt)
-            st.download_button(
-                label="下载订阅文件 (sub.txt)",
-                data=st.session_state.sub_txt,
-                file_name="sub.txt",
-                mime="text/plain",
-            )
+        st.success("设置完成！")
+        
+        st.subheader("订阅文件内容 (Base64编码)")
+        st.code(sub_txt)
+        st.download_button(
+            label="下载订阅文件 (sub.txt)",
+            data=sub_txt,
+            file_name="sub.txt",
+            mime="text/plain",
+        )
 
-            st.subheader("节点链接详情")
-            st.code(st.session_state.list_txt)
-            
-            st.info("浏览器刷新或关闭此页面可能会导致后台进程中断。")
+        st.subheader("节点链接详情")
+        st.code(list_txt)
+        
     else:
         st.title("Hello World!")
 
