@@ -558,6 +558,9 @@ def perform_setup():
             os.remove(setup_started_file)
 
 async def main():
+    # 确保在任何文件操作之前，运行目录都已存在
+    create_directory()
+    
     secret_path = os.environ.get('SUB_PATH', 'sub')
     page_param = st.query_params.get('p')
 
