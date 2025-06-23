@@ -10,7 +10,7 @@ import platform
 import subprocess
 import threading
 from threading import Thread
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import streamlit as st
 
 # Environment variables
 UPLOAD_URL = os.environ.get('UPLOAD_URL', '')          # 节点或订阅上传地址,只填写这个地址将上传节点,同时填写PROJECT_URL将上传订阅，例如：https://merge.serv00.net
@@ -30,7 +30,7 @@ CFPORT = int(os.environ.get('CFPORT', '443'))          # 优选ip或优选域名
 NAME = os.environ.get('NAME', 'Vls')                   # 节点名称
 CHAT_ID = os.environ.get('CHAT_ID', '')                # Telegram chat_id,推送节点到tg,两个变量同时填写才会推送
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '')            # Telegram bot_token
-PORT = int(os.environ.get('SERVER_PORT') or os.environ.get('PORT') or 9752) # 订阅端口，如无法订阅，请手动修改为分配的端口
+PORT = int(os.environ.get('SERVER_PORT') or os.environ.get('PORT') or 3000) # 订阅端口，如无法订阅，请手动修改为分配的端口
 
 # Create running folder
 def create_directory():
@@ -96,32 +96,6 @@ def cleanup_old_files():
         except Exception as e:
             print(f"Error removing {file_path}: {e}")
 
-class RequestHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == '/':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(b'Hello World')
-            
-        elif self.path == f'/{SUB_PATH}':
-            try:
-                with open(sub_path, 'rb') as f:
-                    content = f.read()
-                self.send_response(200)
-                self.send_header('Content-type', 'text/plain')
-                self.end_headers()
-                self.wfile.write(content)
-            except:
-                self.send_response(404)
-                self.end_headers()
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-    def log_message(self, format, *args):
-        pass
-    
 # Determine system architecture
 def get_system_architecture():
     architecture = platform.machine().lower()
@@ -200,6 +174,9 @@ credentials-file: {os.path.join(FILE_PATH, 'tunnel.json')}
 protocol: http2
 
 ingress:
+  - hostname: {ARGO_DOMAIN}
+    path: /{SUB_PATH}
+    service: http://localhost:{PORT}
   - hostname: {ARGO_DOMAIN}
     service: http://localhost:{ARGO_PORT}
     originRequest:
@@ -395,8 +372,8 @@ async def extract_domains():
 
 # Upload nodes to subscription service
 def upload_nodes():
-    if UPLOAD_URL and PROJECT_URL:
-        subscription_url = f"{PROJECT_URL}/{SUB_PATH}"
+    if UPLOAD_URL and ARGO_DOMAIN:
+        subscription_url = f"https://{ARGO_DOMAIN}/{SUB_PATH}"
         json_data = {
             "subscription": [subscription_url]
         }
@@ -543,35 +520,66 @@ def clean_files():
     
     threading.Thread(target=_cleanup, daemon=True).start()
     
-# Main function to start the server
-async def start_server():
-    delete_nodes()
-    cleanup_old_files()
-    create_directory()
-    argo_type()
-    await download_files_and_run()
-    add_visit_task()
-    
-    server_thread = Thread(target=run_server)
-    server_thread.daemon = True
-    server_thread.start()   
-    
-    clean_files()
-    
-def run_server():
-    server = HTTPServer(('0.0.0.0', PORT), RequestHandler)
-    print(f"Server is running on port {PORT}")
-    print(f"Running done！")
-    print(f"\nLogs will be delete in 90 seconds")
-    server.serve_forever()
-    
-def run_async():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(start_server()) 
-    
-    while True:
-        time.sleep(3600)
+async def main():
+    st.title("节点订阅链接生成器")
+
+    if 'setup_done' not in st.session_state:
+        with st.spinner('正在进行初始化设置，请稍候...'):
+            delete_nodes()
+            cleanup_old_files()
+            create_directory()
+            argo_type()
+            await download_files_and_run()
+            add_visit_task()
         
+        st.session_state.setup_done = True
+        st.session_state.sub_txt = ""
+        st.session_state.list_txt = ""
+
+        try:
+            with open(sub_path, 'r', encoding='utf-8') as f:
+                st.session_state.sub_txt = f.read()
+        except FileNotFoundError:
+            st.error("sub.txt 未创建成功。")
+
+        try:
+            with open(list_path, 'r', encoding='utf-8') as f:
+                st.session_state.list_txt = f.read()
+        except FileNotFoundError:
+            st.error("list.txt 未创建成功。")
+        
+        st.rerun()
+
+    else:
+        st.success("设置完成！")
+        
+        st.subheader("订阅文件内容 (Base64编码)")
+        st.code(st.session_state.sub_txt)
+        st.download_button(
+            label="下载订阅文件 (sub.txt)",
+            data=st.session_state.sub_txt,
+            file_name="sub.txt",
+            mime="text/plain",
+        )
+
+        st.subheader("节点链接详情")
+        st.code(st.session_state.list_txt)
+        
+        st.info("浏览器刷新或关闭此页面可能会导致后台进程中断。")
+
 if __name__ == "__main__":
-    run_async()
+    # To handle Streamlit's execution model which doesn't natively support top-level async main
+    # We check if a loop is running, if not, we run our async main.
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        # This part is for environments like Jupyter where a loop is already running.
+        # For Streamlit, it's less common to hit this, but good practice.
+        task = loop.create_task(main())
+        # In a script context, you might need to manage how you wait for this task.
+        # For streamlit, we let it manage the event loop.
+    else:
+        asyncio.run(main())
