@@ -573,19 +573,6 @@ async def main():
     else:
         st.title("Hello World!")
 
-        # --- 调试代码开始 ---
-        # 显示应用当前读取到的值，以帮助我们诊断问题
-        st.subheader("调试信息")
-        secret_path_value = os.environ.get('SUB_PATH', 'sub')
-        page_param_value = st.query_params.get('p')
-        st.write(f"从环境变量 (SUB_PATH) 中读取的秘密路径是: `{secret_path_value}`")
-        st.write(f"从URL (?p=) 中读取到的参数是: `{page_param_value}`")
-        if page_param_value == secret_path_value:
-            st.success("判断结果：匹配成功 (这导致您看到了完整内容，即使在根路径下)。请检查您的环境变量或URL。")
-        else:
-            st.error("判断结果：匹配失败 (这符合预期，应该只显示 Hello World)。")
-        # --- 调试代码结束 ---
-
 if __name__ == "__main__":
     # To handle Streamlit's execution model which doesn't natively support top-level async main
     # We check if a loop is running, if not, we run our async main.
