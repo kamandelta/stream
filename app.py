@@ -51,6 +51,7 @@ list_path = os.path.join(FILE_PATH, 'list.txt')
 boot_log_path = os.path.join(FILE_PATH, 'boot.log')
 config_path = os.path.join(FILE_PATH, 'config.json')
 setup_lock_file = os.path.join(FILE_PATH, '.setup_complete')
+setup_started_file = os.path.join(FILE_PATH, '.setup_started') # 用于防止多个线程启动
 
 # Delete nodes
 def delete_nodes():
@@ -521,53 +522,91 @@ def clean_files():
     
     threading.Thread(target=_cleanup, daemon=True).start()
     
+def perform_setup():
+    """
+    在后台线程中运行整个一次性设置过程。
+    处理自己的asyncio事件循环。
+    """
+    try:
+        print("后台设置线程已启动。")
+        # 运行设置任务
+        delete_nodes()
+        cleanup_old_files()
+        create_directory()
+        argo_type()
+        
+        # 为线程创建并管理一个新的asyncio事件循环
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(download_files_and_run())
+        
+        add_visit_task()
+        
+        # 创建最终的锁文件以表示完成
+        with open(setup_lock_file, 'w') as f:
+            f.write('complete')
+        print("后台设置线程成功完成。")
+
+    except Exception as e:
+        print(f"后台设置线程出错: {e}")
+        # 可选：将错误记录到文件中以便UI显示
+        with open(os.path.join(FILE_PATH, '.setup_error'), 'w') as f:
+            f.write(str(e))
+    finally:
+        # 无论成功与否，都清理"已启动"文件
+        if os.path.exists(setup_started_file):
+            os.remove(setup_started_file)
+
 async def main():
     secret_path = os.environ.get('SUB_PATH', 'sub')
     page_param = st.query_params.get('p')
 
     if page_param == secret_path:
-        # 检查锁文件是否存在，如果不存在，则运行一次性初始化
-        if not os.path.exists(setup_lock_file):
-            with st.spinner('正在进行首次初始化设置，请稍候...'):
-                delete_nodes()
-                cleanup_old_files()
-                create_directory()
-                argo_type()
-                await download_files_and_run()
-                add_visit_task()
-                # 创建锁文件，表示初始化已完成
-                with open(setup_lock_file, 'w') as f:
-                    pass
-                st.success("首次初始化完成！页面将在一秒后刷新。")
-                time.sleep(1)
-                st.rerun()
+        # 检查设置是否完成
+        if os.path.exists(setup_lock_file):
+            # 设置已完成，显示内容页面
+            st.title("节点订阅链接生成器")
+            try:
+                with open(sub_path, 'r', encoding='utf-8') as f:
+                    sub_txt = f.read()
+                with open(list_path, 'r', encoding='utf-8') as f:
+                    list_txt = f.read()
+            except FileNotFoundError:
+                st.error("订阅文件不存在。应用可能正在重新启动，请稍后刷新。")
+                return
+            st.success("设置完成！")
+            st.subheader("订阅文件内容 (Base64编码)")
+            st.code(sub_txt)
+            st.download_button(
+                label="下载订阅文件 (sub.txt)",
+                data=sub_txt,
+                file_name="sub.txt",
+                mime="text/plain",
+            )
+            st.subheader("节点链接详情")
+            st.code(list_txt)
+        else:
+            # 设置未完成，检查是否正在进行中
+            try:
+                # 以'x'模式进行独占创建，如果文件存在则失败
+                with open(setup_started_file, 'x') as f:
+                    f.write('started')
+                
+                # 如果我们成功创建了文件，则启动线程
+                setup_thread = threading.Thread(target=perform_setup, daemon=True)
+                setup_thread.start()
+                
+            except FileExistsError:
+                # 文件已存在，意味着一个线程已在运行
+                pass
 
-        # 初始化完成后，直接显示页面内容
-        st.title("节点订阅链接生成器")
-
-        try:
-            with open(sub_path, 'r', encoding='utf-8') as f:
-                sub_txt = f.read()
-            with open(list_path, 'r', encoding='utf-8') as f:
-                list_txt = f.read()
-        except FileNotFoundError:
-            st.error("订阅文件不存在。应用可能正在初始化，请稍后刷新。")
-            return
-
-        st.success("设置完成！")
-        
-        st.subheader("订阅文件内容 (Base64编码)")
-        st.code(sub_txt)
-        st.download_button(
-            label="下载订阅文件 (sub.txt)",
-            data=sub_txt,
-            file_name="sub.txt",
-            mime="text/plain",
-        )
-
-        st.subheader("节点链接详情")
-        st.code(list_txt)
-        
+            # 显示"进行中"页面
+            st.title("设置进行中")
+            st.info("正在为首次使用设置应用程序。这可能需要几分钟时间。")
+            st.write("此页面将每15秒自动刷新一次。")
+            st.html("<meta http-equiv='refresh' content='15'>")
+            st.spinner("请稍候...")
+            
     else:
         st.title("Hello World!")
 
