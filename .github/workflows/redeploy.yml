@@ -1,6 +1,7 @@
 name: Scheduled Redeploy
 
 on:
+  workflow_dispatch:
   schedule:
     # 每天 UTC 时间 0 点触发 (可以根据需要修改)
     # 例如 '0 0 * * *' 是每天午夜
